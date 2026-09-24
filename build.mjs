@@ -11,7 +11,7 @@ await build({
 })
 
 await build({
-  entryPoints: ['src/client-core.ts', 'src/theme.ts'],
+  entryPoints: ['src/client-core.ts', 'src/locales.ts', 'src/theme.ts'],
   outdir: 'lib',
   bundle: true,
   format: 'esm',

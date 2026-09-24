@@ -1,12 +1,14 @@
 import * as React from 'react'
 import { parseBody } from './rules.js'
 import { modelGroups, readSettings, settingsBridge, validateRules } from './client-core.js'
+import { bodyError, LOCALE_DATA, LOCALE_NS } from './locales.js'
+import type { Translation } from './locales.js'
 import type { Inventory, InventoryModel, Rule, SettingsApi, SettingsSection } from './client-core.js'
 import { palette } from './theme.js'
 import type { Palette } from './theme.js'
 
 export const name = 'dsh-extra-body-client'
-export const inject = ['slots', 'connection']
+export const inject = ['slots', 'connection', 'locale']
 
 const h = React.createElement
 const keyOf = (provider: string, model: string): string => JSON.stringify([provider, model])
@@ -43,8 +45,20 @@ function Button({ colors, icon, children, primary, danger, disabled, onClick }: 
 
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 
-function Editor({ api }: { api: SettingsApi }): React.ReactElement {
+interface ClientLocale {
+  register(namespace: string, dictionaries: typeof LOCALE_DATA): () => void
+  bind(namespace: string): Translation
+  subscribe(listener: () => void): () => void
+  getSnapshot(): { active?: string; revision?: number }
+  setLocale(id: string): void
+}
+
+function Editor({ api, locale, t }: { api: SettingsApi; locale: ClientLocale; t: Translation }): React.ReactElement {
   const colors = palette()
+  const subscribe = React.useCallback((listener: () => void) => locale.subscribe(listener), [locale])
+  const getLocaleSnapshot = React.useCallback(() => locale.getSnapshot(), [locale])
+  const localeSnapshot = React.useSyncExternalStore(subscribe, getLocaleSnapshot, getLocaleSnapshot)
+  const language = localeSnapshot.active === 'zh' ? 'zh' : 'en'
   const [loading, setLoading] = React.useState(true)
   const [busyKey, setBusyKey] = React.useState('')
   const [error, setError] = React.useState('')
@@ -62,7 +76,7 @@ function Editor({ api }: { api: SettingsApi }): React.ReactElement {
     setLoading(true)
     setError('')
     try {
-      const snapshot = readSettings(await api.describe())
+      const snapshot = readSettings(await api.describe(), t)
       setSection(snapshot.section)
       setInventory(snapshot.inventory)
       setRules(snapshot.rules)
@@ -72,15 +86,15 @@ function Editor({ api }: { api: SettingsApi }): React.ReactElement {
       if (firstRoute) setOpenProviders(current => Object.keys(current).length ? current : { [firstRoute]: true })
     } catch (cause) { setError(messageOf(cause)) }
     finally { setLoading(false) }
-  }, [api])
+  }, [api, t])
   React.useEffect(() => { void load() }, [load])
 
   const mutateRules = async (key: string, nextRules: Rule[], message: string): Promise<void> => {
-    if (!section || !Number.isInteger(section.revision)) { setError('设置版本号不可用，请刷新后重试'); return }
+    if (!section || !Number.isInteger(section.revision)) { setError(t('missingRevision')); return }
     setBusyKey(key); setError(''); setNotice('')
     try {
-      const result = await api.mutate(section.ns, [{ op: 'set', path: ['rules'], value: validateRules(nextRules) }], section.revision)
-      if (result?.ok !== true) throw new Error(result?.error?.message || '保存失败')
+      const result = await api.mutate(section.ns, [{ op: 'set', path: ['rules'], value: validateRules(nextRules, t) }], section.revision)
+      if (result?.ok !== true) throw new Error(result?.error?.message || t('saveFailed'))
       await load()
       setNotice(message)
     } catch (cause) { setError(messageOf(cause)) }
@@ -88,9 +102,9 @@ function Editor({ api }: { api: SettingsApi }): React.ReactElement {
   }
   const saveModel = (provider: string, model: string, body: string): void => { void mutateRules(keyOf(provider, model), [
     ...rules.filter(row => row.provider !== provider || row.model !== model), { provider, model, body },
-  ], `${model} 已保存`) }
+  ], t('modelSaved', { model })) }
   const removeModel = (provider: string, model: string): void => { void mutateRules(keyOf(provider, model),
-    rules.filter(row => row.provider !== provider || row.model !== model), `${model} 的附加字段已移除`) }
+    rules.filter(row => row.provider !== provider || row.model !== model), t('ruleRemoved', { model })) }
 
   const routes = [...new Set([...Object.keys(inventory), ...rules.map(row => row.provider)])]
   const search = query.trim().toLowerCase()
@@ -105,44 +119,48 @@ function Editor({ api }: { api: SettingsApi }): React.ReactElement {
     const open = openModels[key] === true
     const dirty = rule ? body !== rule.body : body !== exampleBody
     let validationError = ''
-    try { parseBody(body) } catch (cause) { validationError = messageOf(cause) }
+    try { parseBody(body) } catch (cause) { validationError = bodyError(cause, t) }
     return h('div', { key, style: { marginTop: 4, overflow: 'hidden', border: `1px solid ${open ? colors.accent : dirty ? colors.accentBorder : colors.border}`, borderRadius: 8, backgroundColor: open ? colors.raised : colors.group, boxShadow: colors.shadow } },
       h('button', { type: 'button', onClick: () => setOpenModels(current => ({ ...current, [key]: !current[key] })), style: { display: 'flex', alignItems: 'center', gap: 8, boxSizing: 'border-box', width: '100%', minHeight: 42, padding: '5px 8px', border: 'none', background: 'transparent', color: colors.text, textAlign: 'left', cursor: 'pointer' } },
         h('span', { style: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 7, backgroundColor: colors.field, color: colors.accent } }, h(Icon, { name: 'model', size: 14 })),
         h('span', { style: { display: 'grid', minWidth: 0, gap: 2 } }, h('strong', { style: { fontSize: 13, overflowWrap: 'anywhere' } }, item.id), item.name !== item.id ? h('small', { style: { ...muted, fontSize: 10 } }, item.name) : null),
-        item.stale ? h('span', { style: { color: colors.danger, fontSize: 10 } }, '模型已不在清单中') : null,
-        h('span', { style: { marginLeft: 'auto', padding: '2px 5px', borderRadius: 5, color: rule ? colors.accent : colors.secondary, backgroundColor: rule ? colors.accentSoft : 'transparent', fontSize: 10, whiteSpace: 'nowrap' } }, rule ? dirty ? '未保存' : '已配置' : '未配置'),
+        item.stale ? h('span', { style: { color: colors.danger, fontSize: 10 } }, t('missingModel')) : null,
+        h('span', { style: { marginLeft: 'auto', padding: '2px 5px', borderRadius: 5, color: rule ? colors.accent : colors.secondary, backgroundColor: rule ? colors.accentSoft : 'transparent', fontSize: 10, whiteSpace: 'nowrap' } }, rule ? dirty ? t('unsaved') : t('configured') : t('unconfigured')),
         h('span', { style: { color: colors.accent } }, h(Icon, { name: open ? 'up' : 'down', size: 15 })),
       ),
       open ? h('div', { style: { padding: '10px 12px 12px', borderTop: `1px solid ${colors.divider}` } },
-        h('label', { style: { display: 'grid', gap: 6, fontSize: 12, fontWeight: 650 } }, '请求 JSON 附加字段',
+        h('label', { style: { display: 'grid', gap: 6, fontSize: 12, fontWeight: 650 } }, t('bodyLabel'),
           h('textarea', { value: body, rows: 7, spellCheck: false, onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => setDrafts(current => ({ ...current, [key]: event.target.value })), style: { ...field, minHeight: 130, padding: '9px 10px', resize: 'vertical', fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 12, lineHeight: '18px' } })),
-        h('p', { style: { margin: '6px 0 10px', color: validationError ? colors.danger : colors.secondary, fontSize: 11 } }, validationError || '填写实际发送的 JSON 对象；例如 {"requesty":{"auto_cache":true}}，无需 extra_body 包装。'),
+        h('p', { style: { margin: '6px 0 10px', color: validationError ? colors.danger : colors.secondary, fontSize: 11 } }, validationError || t('bodyHint')),
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
-          h(Button, { colors, icon: 'check', primary: true, disabled: !!busyKey || !writable || !!validationError || (!!rule && !dirty), onClick: () => saveModel(route, item.id, body) }, busyKey === key ? '保存中…' : '保存此模型'),
-          rule ? h(Button, { colors, icon: 'trash', danger: true, disabled: !!busyKey || !writable, onClick: () => removeModel(route, item.id) }, '删除规则') : null,
-          dirty ? h(Button, { colors, disabled: !!busyKey, onClick: () => setDrafts(current => ({ ...current, [key]: rule?.body ?? exampleBody })) }, '放弃修改') : null,
+          h(Button, { colors, icon: 'check', primary: true, disabled: !!busyKey || !writable || !!validationError || (!!rule && !dirty), onClick: () => saveModel(route, item.id, body) }, busyKey === key ? t('saving') : t('saveModel')),
+          rule ? h(Button, { colors, icon: 'trash', danger: true, disabled: !!busyKey || !writable, onClick: () => removeModel(route, item.id) }, t('deleteRule')) : null,
+          dirty ? h(Button, { colors, disabled: !!busyKey, onClick: () => setDrafts(current => ({ ...current, [key]: rule?.body ?? exampleBody })) }, t('discard')) : null,
         ),
       ) : null)
   }
 
   return h('div', { style: { position: 'relative', maxWidth: 920, margin: '0 auto', padding: '6px 8px 34px', color: colors.text, fontFamily: '-apple-system, BlinkMacSystemFont, SF Pro Text, Segoe UI, sans-serif' } },
-    h('h3', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 18, lineHeight: '24px', fontWeight: 700, margin: '0 0 6px' } }, h(Icon, { name: 'sliders', size: 19 }), '请求附加字段', notice ? h('span', { role: 'status', style: { marginLeft: 'auto', padding: '2px 7px', border: `1px solid ${colors.accentBorder}`, borderRadius: 6, backgroundColor: colors.accentSoft, color: colors.accent, fontSize: 11 } }, notice) : null),
-    h('p', { style: { ...muted, margin: '0 0 12px', lineHeight: '18px' } }, '从现有供应商与模型中选择，对该模型的 JSON 生成请求合并自定义字段。'),
+    h('label', { style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, fontSize: 12, marginBottom: 4 } }, t('languageLabel'),
+      h('select', { 'aria-label': t('languageLabel'), value: language, onChange: (event: React.ChangeEvent<HTMLSelectElement>) => { setError(''); setNotice(''); locale.setLocale(event.target.value) }, style: { height: 26, padding: '0 7px', border: `1px solid ${colors.border}`, borderRadius: 7, backgroundColor: colors.field, color: colors.text, fontSize: 12 } },
+        h('option', { value: 'zh' }, t('chinese')),
+        h('option', { value: 'en' }, t('english')))),
+    h('h3', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 18, lineHeight: '24px', fontWeight: 700, margin: '0 0 6px' } }, h(Icon, { name: 'sliders', size: 19 }), t('pageTitle'), notice ? h('span', { role: 'status', style: { marginLeft: 'auto', padding: '2px 7px', border: `1px solid ${colors.accentBorder}`, borderRadius: 6, backgroundColor: colors.accentSoft, color: colors.accent, fontSize: 11 } }, notice) : null),
+    h('p', { style: { ...muted, margin: '0 0 12px', lineHeight: '18px' } }, t('pageDescription')),
     error ? h('div', { role: 'alert', style: { padding: '7px 9px', marginBottom: 9, border: `1px solid ${colors.dangerBorder}`, borderRadius: 8, backgroundColor: colors.dangerBg, color: colors.danger, fontSize: 12 } }, error) : null,
-    h('div', { style: { position: 'relative', marginBottom: 8 } }, h('span', { style: { position: 'absolute', left: 10, top: 7, color: colors.secondary, pointerEvents: 'none' } }, h(Icon, { name: 'search', size: 15 })), h('input', { type: 'search', value: query, placeholder: '搜索供应商或模型（名称或 ID）…', onChange: (event: React.ChangeEvent<HTMLInputElement>) => setQuery(event.target.value), style: { ...field, height: 31, padding: '0 10px 0 32px', fontSize: 13 } })),
-    ...(loading ? [h('p', { style: muted }, '正在读取供应商和模型…')] : groups.length === 0 ? [h('div', { style: { ...muted, padding: 14, border: `1px solid ${colors.border}`, borderRadius: 8, backgroundColor: colors.group } }, routes.length === 0 ? '尚未在 llm-pi-ai 中找到供应商和模型。' : '没有匹配的模型。')] :
+    h('div', { style: { position: 'relative', marginBottom: 8 } }, h('span', { style: { position: 'absolute', left: 10, top: 7, color: colors.secondary, pointerEvents: 'none' } }, h(Icon, { name: 'search', size: 15 })), h('input', { type: 'search', value: query, placeholder: t('searchPlaceholder'), onChange: (event: React.ChangeEvent<HTMLInputElement>) => setQuery(event.target.value), style: { ...field, height: 31, padding: '0 10px 0 32px', fontSize: 13 } })),
+    ...(loading ? [h('p', { style: muted }, t('loading'))] : groups.length === 0 ? [h('div', { style: { ...muted, padding: 14, border: `1px solid ${colors.border}`, borderRadius: 8, backgroundColor: colors.group } }, routes.length === 0 ? t('noProviders') : t('noMatches'))] :
       groups.map(({ route, models, configured }) => {
         const open = search !== '' || openProviders[route] === true
         return h('section', { key: route, style: { marginBottom: 7 } },
           h('button', { type: 'button', onClick: () => setOpenProviders(current => ({ ...current, [route]: !current[route] })), style: { display: 'flex', alignItems: 'center', gap: 8, boxSizing: 'border-box', width: '100%', minHeight: 40, padding: '5px 8px', border: `1px solid ${colors.border}`, borderRadius: 8, backgroundColor: colors.raised, color: colors.text, textAlign: 'left', cursor: 'pointer' } },
             h('span', { style: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, border: `1px solid ${colors.border}`, borderRadius: 7, backgroundColor: colors.group, color: colors.secondary } }, h(Icon, { name: 'layers', size: 14 })),
-            h('span', { style: { display: 'grid', gap: 1, minWidth: 0 } }, h('strong', { style: { fontSize: 12, overflowWrap: 'anywhere' } }, route), h('small', { style: { color: colors.accent, fontSize: 10 } }, '供应商')),
-            h('span', { style: { marginLeft: 'auto', color: colors.secondary, fontSize: 11, whiteSpace: 'nowrap' } }, `${models.length} 个模型`, configured ? ` · ${configured} 个已配置` : ''),
+            h('span', { style: { display: 'grid', gap: 1, minWidth: 0 } }, h('strong', { style: { fontSize: 12, overflowWrap: 'anywhere' } }, route), h('small', { style: { color: colors.accent, fontSize: 10 } }, t('provider'))),
+            h('span', { style: { marginLeft: 'auto', color: colors.secondary, fontSize: 11, whiteSpace: 'nowrap' } }, t('modelCount', { count: models.length }), configured ? t('configuredCount', { count: configured }) : ''),
             h('span', { style: { color: colors.accent } }, h(Icon, { name: open ? 'up' : 'down', size: 15 }))),
           ...(open ? models.map(item => renderModel(route, item)) : []))
       })),
-    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 } }, h('span', { style: { ...muted, fontSize: 11 } }, `${rules.length} 条已保存规则`), h(Button, { colors, icon: 'refresh', disabled: loading || !!busyKey, onClick: () => { setNotice(''); void load() } }, '刷新列表')))
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 } }, h('span', { style: { ...muted, fontSize: 11 } }, t('savedRuleCount', { count: rules.length })), h(Button, { colors, icon: 'refresh', disabled: loading || !!busyKey, onClick: () => { setNotice(''); void load() } }, t('refresh'))))
 }
 
 interface ClientSlots {
@@ -152,18 +170,22 @@ interface ClientSlots {
 interface ClientContext {
   get(name: string): unknown
   on(event: string, callback: (service: unknown) => void): unknown
+  effect(factory: () => () => void, label: string): unknown
 }
 
 export function apply(ctx: ClientContext): void {
   const slots = ctx.get('slots') as ClientSlots | undefined
-  if (!slots || typeof slots.inject !== 'function' || typeof slots.register !== 'function') return
+  const locale = ctx.get('locale') as ClientLocale | undefined
+  if (!slots || typeof slots.inject !== 'function' || typeof slots.register !== 'function' || !locale) return
   let mounted = false
   const mount = () => {
     if (mounted) return
     const api = settingsBridge(ctx.get('connection'), ctx.get('remote.settings'))
     if (!api) return
     mounted = true
-    slots.inject('settings.section', () => slots.register({ name: 'settings.section', id: 'dsh-extra-body', order: 13, label: () => '请求附加字段' }, () => React.createElement(Editor, { api })))
+    ctx.effect(() => locale.register(LOCALE_NS, LOCALE_DATA), 'dsh-extra-body: locale dictionaries')
+    const t = locale.bind(LOCALE_NS)
+    slots.inject('settings.section', () => slots.register({ name: 'settings.section', id: 'dsh-extra-body', order: 13, locale: LOCALE_NS, label: () => t('pageTitle') }, () => React.createElement(Editor, { api, locale, t })))
   }
   mount()
   ctx.on('internal/service', (service: unknown) => { if (service === 'remote.settings' || service === 'remote') mount() })

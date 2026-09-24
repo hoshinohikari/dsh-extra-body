@@ -10,13 +10,14 @@
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml"
   },
-  "files": ["lib/index.js", "lib/client.js", "cordis.patch.yml", "README.md", "LICENSE"],
+  "files": ["lib/index.js", "lib/client.js", "cordis.patch.yml", "README.md", "README.zh.md", "LICENSE"],
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-api-remotes"
       ]

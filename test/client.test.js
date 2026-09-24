@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { modelGroups, readSettings, settingsBridge, validateRules } from '../lib/client-core.js'
+import { LOCALE_DATA, textFor } from '../lib/locales.js'
 
 const namespaces = [
   { ns: 'extra-body', revision: 4, value: { rules: [{ provider: 'requesty', model: 'model-a', body: '{"requesty":{"auto_cache":true}}' }] } },
@@ -34,7 +35,10 @@ test('settings snapshot supplies model choices and validates rows', () => {
   assert.equal(snapshot.section.revision, 4)
   assert.deepEqual(validateRules(snapshot.rules), snapshot.rules)
   assert.throws(() => validateRules([...snapshot.rules, ...snapshot.rules]), /已有规则/)
-  assert.throws(() => validateRules([{ ...snapshot.rules[0], body: '{"model":"other"}' }]), /cannot replace model/)
+  assert.throws(() => validateRules([{ ...snapshot.rules[0], body: '{"model":"other"}' }]), /不能覆盖顶层 model/)
+  const en = (key, params) => textFor('en', key, params)
+  assert.throws(() => validateRules([{ ...snapshot.rules[0], body: '{"model":"other"}' }], en), /Cannot replace top-level model/)
+  assert.throws(() => readSettings({ ok: true, value: { namespaces: [] } }, en), /Extra Request Fields settings section not found/)
 })
 
 test('model groups discover provider models and retain stale configured rules', () => {
@@ -49,7 +53,7 @@ test('model groups discover provider models and retain stale configured rules', 
   assert.deepEqual(modelGroups({ requesty: [{ id: 'live', name: 'Live Model' }] }, [], 'live model')[0].models.map(item => item.id), ['live'])
 })
 
-test('browser bundle registers a Desktop settings section', () => {
+test('browser bundle registers a bilingual Desktop settings section', () => {
   let registration
   let render
   const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
@@ -63,6 +67,7 @@ test('browser bundle registers a Desktop settings section', () => {
     createElement: (type, props, ...children) => ({ type, props, children }),
     useState(initial) { return [hookValues[hookIndex++] ?? initial, () => {}] },
     useCallback(callback) { return callback },
+    useSyncExternalStore(_subscribe, getSnapshot) { return getSnapshot() },
     useEffect() {},
   }
   const client = registration.factory(specifier => {
@@ -70,13 +75,24 @@ test('browser bundle registers a Desktop settings section', () => {
     return react
   })
   let descriptor
+  let active = 'zh'
+  let dictionaries
+  const locale = {
+    register(_namespace, value) { dictionaries = value; return () => {} },
+    bind() { return (key, params) => (dictionaries[active][key] ?? key).replace(/\{(\w+)\}/g, (match, name) => name in (params ?? {}) ? String(params[name]) : match) },
+    subscribe() { return () => {} },
+    getSnapshot() { return { active, revision: 1 } },
+    setLocale(value) { active = value },
+  }
   client.apply({
     get(name) {
       if (name === 'slots') return { inject(_slot, register) { register() }, register(value, component) { descriptor = value; render = component; return () => {} } }
       if (name === 'connection') return { api: { settings: { describe() {}, mutate() {} } } }
+      if (name === 'locale') return locale
       return undefined
     },
     on() {},
+    effect(callback) { callback() },
   })
   assert.equal(descriptor.id, 'dsh-extra-body')
   assert.equal(descriptor.label(), '请求附加字段')
@@ -85,4 +101,22 @@ test('browser bundle registers a Desktop settings section', () => {
   const words = JSON.stringify(tree)
   assert.match(words, /requesty/)
   assert.match(words, /model-a/)
+  assert.match(words, /请求附加字段/)
+  const find = (node, predicate) => {
+    if (Array.isArray(node)) return node.map(value => find(value, predicate)).find(Boolean)
+    if (!node || typeof node !== 'object') return undefined
+    if (predicate(node)) return node
+    return find(node.children, predicate)
+  }
+  const languageSelect = find(tree, node => node.type === 'select' && node.props?.['aria-label'] === '页面语言')
+  assert.ok(languageSelect)
+  languageSelect.props.onChange({ target: { value: 'en' } })
+  assert.equal(active, 'en')
+  hookIndex = 0
+  assert.equal(descriptor.label(), 'Extra Request Fields')
+  const englishTree = element.type(element.props)
+  const englishWords = JSON.stringify(englishTree)
+  assert.match(englishWords, /Extra Request Fields/)
+  assert.match(englishWords, /Search providers or models/)
+  assert.equal(LOCALE_DATA.en.pageTitle, 'Extra Request Fields')
 })

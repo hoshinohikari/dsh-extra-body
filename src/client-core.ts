@@ -1,4 +1,8 @@
 import { isObject, parseBody } from './rules.js'
+import { bodyError, textFor } from './locales.js'
+import type { Translation } from './locales.js'
+
+const defaultTranslation: Translation = (key, params) => textFor('zh', key, params)
 
 export interface Rule {
   provider: string
@@ -74,13 +78,13 @@ export function settingsBridge(connection: unknown, remoteSettings: unknown): Se
   return undefined
 }
 
-export function readSettings(reply: ClientReply): SettingsSnapshot {
-  if (reply?.ok !== true) throw new Error(reply?.error?.message || '无法读取 DSH 设置')
+export function readSettings(reply: ClientReply, t: Translation = defaultTranslation): SettingsSnapshot {
+  if (reply?.ok !== true) throw new Error(reply?.error?.message || t('readFailed'))
   const value = isObject(reply.value) ? reply.value : undefined
   const namespaces = value?.namespaces
-  if (!Array.isArray(namespaces)) throw new Error('DSH 设置响应缺少分区列表')
+  if (!Array.isArray(namespaces)) throw new Error(t('missingNamespaces'))
   const sectionRaw = namespaces.find(item => isObject(item) && (item.ns === 'extra-body' || item.ns === 'dsh-extra-body'))
-  if (!isObject(sectionRaw) || typeof sectionRaw.ns !== 'string') throw new Error('找不到请求附加字段设置分区，请确认宿主插件已加载')
+  if (!isObject(sectionRaw) || typeof sectionRaw.ns !== 'string') throw new Error(t('missingSection'))
   const section: SettingsSection = {
     ns: sectionRaw.ns,
     revision: typeof sectionRaw.revision === 'number' ? sectionRaw.revision : NaN,
@@ -116,17 +120,17 @@ export function readSettings(reply: ClientReply): SettingsSnapshot {
   return { section, inventory, rules, writable: value?.writable !== false }
 }
 
-export function validateRules(rows: Rule[]): Rule[] {
+export function validateRules(rows: Rule[], t: Translation = defaultTranslation): Rule[] {
   const seen = new Set<string>()
   return rows.map((row, index) => {
     const provider = row.provider.trim()
     const model = row.model.trim()
-    if (!provider || !model) throw new Error(`第 ${index + 1} 条：请选择 provider 并填写模型 ID`)
+    if (!provider || !model) throw new Error(t('incompleteRule', { index: index + 1 }))
     const key = JSON.stringify([provider, model])
-    if (seen.has(key)) throw new Error(`第 ${index + 1} 条：同一个 provider 和模型已有规则`)
+    if (seen.has(key)) throw new Error(t('duplicateRule', { index: index + 1 }))
     seen.add(key)
     try { parseBody(row.body) }
-    catch (error) { throw new Error(`第 ${index + 1} 条：${error instanceof Error ? error.message : String(error)}`) }
+    catch (error) { throw new Error(t('ruleError', { index: index + 1, message: bodyError(error, t) })) }
     return { provider, model, body: row.body.trim() }
   })
 }

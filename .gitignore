@@ -1,3 +1,4 @@
 node_modules/
 lib/client-core.js
+lib/locales.js
 lib/theme.js
