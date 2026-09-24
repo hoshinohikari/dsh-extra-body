@@ -10,7 +10,7 @@
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml"
   },
-  "files": ["lib/index.js", "lib/rules.js", "lib/client.js", "cordis.patch.yml", "README.md", "LICENSE"],
+  "files": ["lib/index.js", "lib/client.js", "cordis.patch.yml", "README.md", "LICENSE"],
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {
@@ -23,13 +23,20 @@
     }
   },
   "scripts": {
-    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "npm run typecheck && node build.mjs",
     "test": "npm run build && node --test",
     "prepack": "npm run build"
   },
   "dependencies": { "@deepseek-ai/schemastery": "^3.18.3" },
   "peerDependencies": { "@deepseek-ai/cordis": "^4.0.1" },
   "peerDependenciesMeta": { "@deepseek-ai/cordis": { "optional": true } },
-  "devDependencies": { "esbuild": "^0.28.2" },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "@types/react": "^18.3.3",
+    "esbuild": "^0.28.2",
+    "react": "^18.3.1",
+    "typescript": "^5.9.3"
+  },
   "license": "MIT"
 }

@@ -1,14 +1,38 @@
-function colorParts(color) {
-  const values = typeof color === 'string' ? color.match(/\d+(?:\.\d+)?/g)?.map(Number) : undefined
-  return values?.length >= 3 ? values : undefined
+export interface ThemeEnvironment {
+  bodyBackground?: string
+  rootBackground?: string
+  textColor?: string
+  prefersDark?: boolean
 }
 
-function luminance(values) {
-  return values[0] * 0.2126 + values[1] * 0.7152 + values[2] * 0.0722
+export interface Palette {
+  group: string
+  raised: string
+  field: string
+  border: string
+  divider: string
+  text: string
+  secondary: string
+  accent: string
+  accentSoft: string
+  accentBorder: string
+  danger: string
+  dangerBg: string
+  dangerBorder: string
+  shadow: string
+}
+
+function colorParts(color: unknown): number[] | undefined {
+  const values = typeof color === 'string' ? color.match(/\d+(?:\.\d+)?/g)?.map(Number) : undefined
+  return values !== undefined && values.length >= 3 ? values : undefined
+}
+
+function luminance(values: number[]): number {
+  return values[0]! * 0.2126 + values[1]! * 0.7152 + values[2]! * 0.0722
 }
 
 /** Transparent body backgrounds must not be interpreted as opaque black. */
-export function isDarkTheme({ bodyBackground, rootBackground, textColor, prefersDark } = {}) {
+export function isDarkTheme({ bodyBackground, rootBackground, textColor, prefersDark }: ThemeEnvironment = {}): boolean {
   for (const color of [bodyBackground, rootBackground]) {
     const values = colorParts(color)
     if (values && (values[3] ?? 1) > 0) return luminance(values) < 145
@@ -19,7 +43,7 @@ export function isDarkTheme({ bodyBackground, rootBackground, textColor, prefers
 }
 
 /** Match the Desktop settings surface, including transparent page backgrounds. */
-export function palette(environment) {
+export function palette(environment?: ThemeEnvironment): Palette {
   let dark = false
   if (environment !== undefined) dark = isDarkTheme(environment)
   else {

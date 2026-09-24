@@ -42,3 +42,16 @@ The CLI adds the dependency and bundle layer to the selected profile. Restart DS
 The plugin leaves unmatched requests unchanged. The first rule for a provider and model wins. It merges object fields recursively and replaces arrays or scalar values at the same key. It refuses rules that replace top-level `model`, `messages`, or `stream`. A malformed JSON rule is ignored and logged once. No API keys or request bodies are logged. Non-JSON requests, WebSocket transports, and SDKs that bypass global `fetch` are outside this interception point. A provider must accept the custom field on each protocol you use.
 
 The current DSH pi-ai adapter does not expose the SDK's `onPayload` callback to plugins. This plugin therefore wraps `fetch` during `llm/stream` iteration, following the same request-context pattern used by `dsh-thinking-effort`. It requires a transport that uses the process's global `fetch`; other transports are left unchanged.
+
+## Local development and testing
+
+The host and Desktop client are written in TypeScript under `src/`. DSH still loads the compiled JavaScript in `lib/`.
+
+```powershell
+npm ci
+npm run typecheck
+npm test
+npm pack --dry-run
+```
+
+`npm test` runs the type check, rebuilds both DSH entry points, and runs the request, settings, browser-bundle, and theme tests. The pack check confirms that the published package contains the compiled host and client. For a profile linked to this checkout, restart DSH Desktop after building, then open **Settings → 请求附加字段** and test a rule on a provider/model you control. Inspect that provider's request log to confirm the extra JSON field reached it.

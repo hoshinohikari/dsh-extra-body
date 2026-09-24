@@ -1,13 +1,15 @@
 import * as React from 'react'
-import { parseBody } from '../lib/rules.js'
+import { parseBody } from './rules.js'
 import { modelGroups, readSettings, settingsBridge, validateRules } from './client-core.js'
+import type { Inventory, InventoryModel, Rule, SettingsApi, SettingsSection } from './client-core.js'
 import { palette } from './theme.js'
+import type { Palette } from './theme.js'
 
 export const name = 'dsh-extra-body-client'
 export const inject = ['slots', 'connection']
 
 const h = React.createElement
-const keyOf = (provider, model) => JSON.stringify([provider, model])
+const keyOf = (provider: string, model: string): string => JSON.stringify([provider, model])
 const exampleBody = '{\n  "requesty": {\n    "auto_cache": true\n  }\n}'
 const paths = {
   sliders: 'M4 7h16M4 17h16M9 4v6m6 4v6', layers: 'm12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5m-18 5 9 5 9-5',
@@ -16,10 +18,20 @@ const paths = {
   refresh: 'M20 7v5h-5M4 17v-5h5M5 9a7 7 0 0 1 12-3l3 1M4 17l3 1a7 7 0 0 0 12-3',
   trash: 'M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13M10 11v6m4-6v6',
 }
-function Icon({ name, size = 16 }) {
+type IconName = keyof typeof paths
+function Icon({ name, size = 16 }: { name: IconName; size?: number }): React.ReactElement {
   return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true }, h('path', { d: paths[name] }))
 }
-function Button({ colors, icon, children, primary, danger, disabled, onClick }) {
+interface ButtonProps {
+  colors: Palette
+  icon?: IconName
+  children?: React.ReactNode
+  primary?: boolean
+  danger?: boolean
+  disabled?: boolean
+  onClick?: () => void
+}
+function Button({ colors, icon, children, primary, danger, disabled, onClick }: ButtonProps): React.ReactElement {
   return h('button', { type: 'button', disabled, onClick, style: {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 28,
     padding: '4px 10px', borderRadius: 7, border: `1px solid ${primary ? colors.accent : danger ? colors.dangerBorder : colors.border}`,
@@ -29,19 +41,21 @@ function Button({ colors, icon, children, primary, danger, disabled, onClick }) 
   } }, icon ? h(Icon, { name: icon, size: 14 }) : null, children)
 }
 
-function Editor({ api }) {
+function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error) }
+
+function Editor({ api }: { api: SettingsApi }): React.ReactElement {
   const colors = palette()
   const [loading, setLoading] = React.useState(true)
   const [busyKey, setBusyKey] = React.useState('')
   const [error, setError] = React.useState('')
   const [notice, setNotice] = React.useState('')
-  const [section, setSection] = React.useState(null)
-  const [inventory, setInventory] = React.useState({})
-  const [rules, setRules] = React.useState([])
-  const [drafts, setDrafts] = React.useState({})
+  const [section, setSection] = React.useState<SettingsSection | null>(null)
+  const [inventory, setInventory] = React.useState<Inventory>({})
+  const [rules, setRules] = React.useState<Rule[]>([])
+  const [drafts, setDrafts] = React.useState<Record<string, string>>({})
   const [query, setQuery] = React.useState('')
-  const [openProviders, setOpenProviders] = React.useState({})
-  const [openModels, setOpenModels] = React.useState({})
+  const [openProviders, setOpenProviders] = React.useState<Record<string, boolean>>({})
+  const [openModels, setOpenModels] = React.useState<Record<string, boolean>>({})
   const [writable, setWritable] = React.useState(true)
 
   const load = React.useCallback(async () => {
@@ -56,12 +70,12 @@ function Editor({ api }) {
       setWritable(snapshot.writable)
       const firstRoute = Object.keys(snapshot.inventory)[0]
       if (firstRoute) setOpenProviders(current => Object.keys(current).length ? current : { [firstRoute]: true })
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    } catch (cause) { setError(messageOf(cause)) }
     finally { setLoading(false) }
   }, [api])
   React.useEffect(() => { void load() }, [load])
 
-  const mutateRules = async (key, nextRules, message) => {
+  const mutateRules = async (key: string, nextRules: Rule[], message: string): Promise<void> => {
     if (!section || !Number.isInteger(section.revision)) { setError('设置版本号不可用，请刷新后重试'); return }
     setBusyKey(key); setError(''); setNotice('')
     try {
@@ -69,29 +83,29 @@ function Editor({ api }) {
       if (result?.ok !== true) throw new Error(result?.error?.message || '保存失败')
       await load()
       setNotice(message)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    } catch (cause) { setError(messageOf(cause)) }
     finally { setBusyKey('') }
   }
-  const saveModel = (provider, model, body) => void mutateRules(keyOf(provider, model), [
+  const saveModel = (provider: string, model: string, body: string): void => { void mutateRules(keyOf(provider, model), [
     ...rules.filter(row => row.provider !== provider || row.model !== model), { provider, model, body },
-  ], `${model} 已保存`)
-  const removeModel = (provider, model) => void mutateRules(keyOf(provider, model),
-    rules.filter(row => row.provider !== provider || row.model !== model), `${model} 的附加字段已移除`)
+  ], `${model} 已保存`) }
+  const removeModel = (provider: string, model: string): void => { void mutateRules(keyOf(provider, model),
+    rules.filter(row => row.provider !== provider || row.model !== model), `${model} 的附加字段已移除`) }
 
   const routes = [...new Set([...Object.keys(inventory), ...rules.map(row => row.provider)])]
   const search = query.trim().toLowerCase()
   const groups = modelGroups(inventory, rules, query)
 
-  const muted = { color: colors.secondary, fontSize: 12 }
-  const field = { boxSizing: 'border-box', width: '100%', border: `1px solid ${colors.border}`, borderRadius: 8, backgroundColor: colors.field, color: colors.text, outline: 'none', boxShadow: colors.shadow }
-  const renderModel = (route, item) => {
+  const muted: React.CSSProperties = { color: colors.secondary, fontSize: 12 }
+  const field: React.CSSProperties = { boxSizing: 'border-box', width: '100%', border: `1px solid ${colors.border}`, borderRadius: 8, backgroundColor: colors.field, color: colors.text, outline: 'none', boxShadow: colors.shadow }
+  const renderModel = (route: string, item: InventoryModel): React.ReactElement => {
     const key = keyOf(route, item.id)
     const rule = rules.find(row => row.provider === route && row.model === item.id)
     const body = drafts[key] ?? rule?.body ?? exampleBody
     const open = openModels[key] === true
     const dirty = rule ? body !== rule.body : body !== exampleBody
     let validationError = ''
-    try { parseBody(body) } catch (cause) { validationError = cause.message }
+    try { parseBody(body) } catch (cause) { validationError = messageOf(cause) }
     return h('div', { key, style: { marginTop: 4, overflow: 'hidden', border: `1px solid ${open ? colors.accent : dirty ? colors.accentBorder : colors.border}`, borderRadius: 8, backgroundColor: open ? colors.raised : colors.group, boxShadow: colors.shadow } },
       h('button', { type: 'button', onClick: () => setOpenModels(current => ({ ...current, [key]: !current[key] })), style: { display: 'flex', alignItems: 'center', gap: 8, boxSizing: 'border-box', width: '100%', minHeight: 42, padding: '5px 8px', border: 'none', background: 'transparent', color: colors.text, textAlign: 'left', cursor: 'pointer' } },
         h('span', { style: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 7, backgroundColor: colors.field, color: colors.accent } }, h(Icon, { name: 'model', size: 14 })),
@@ -102,7 +116,7 @@ function Editor({ api }) {
       ),
       open ? h('div', { style: { padding: '10px 12px 12px', borderTop: `1px solid ${colors.divider}` } },
         h('label', { style: { display: 'grid', gap: 6, fontSize: 12, fontWeight: 650 } }, '请求 JSON 附加字段',
-          h('textarea', { value: body, rows: 7, spellCheck: false, onChange: event => setDrafts(current => ({ ...current, [key]: event.target.value })), style: { ...field, minHeight: 130, padding: '9px 10px', resize: 'vertical', fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 12, lineHeight: '18px' } })),
+          h('textarea', { value: body, rows: 7, spellCheck: false, onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => setDrafts(current => ({ ...current, [key]: event.target.value })), style: { ...field, minHeight: 130, padding: '9px 10px', resize: 'vertical', fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 12, lineHeight: '18px' } })),
         h('p', { style: { margin: '6px 0 10px', color: validationError ? colors.danger : colors.secondary, fontSize: 11 } }, validationError || '填写实际发送的 JSON 对象；例如 {"requesty":{"auto_cache":true}}，无需 extra_body 包装。'),
         h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
           h(Button, { colors, icon: 'check', primary: true, disabled: !!busyKey || !writable || !!validationError || (!!rule && !dirty), onClick: () => saveModel(route, item.id, body) }, busyKey === key ? '保存中…' : '保存此模型'),
@@ -116,7 +130,7 @@ function Editor({ api }) {
     h('h3', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 18, lineHeight: '24px', fontWeight: 700, margin: '0 0 6px' } }, h(Icon, { name: 'sliders', size: 19 }), '请求附加字段', notice ? h('span', { role: 'status', style: { marginLeft: 'auto', padding: '2px 7px', border: `1px solid ${colors.accentBorder}`, borderRadius: 6, backgroundColor: colors.accentSoft, color: colors.accent, fontSize: 11 } }, notice) : null),
     h('p', { style: { ...muted, margin: '0 0 12px', lineHeight: '18px' } }, '从现有供应商与模型中选择，对该模型的 JSON 生成请求合并自定义字段。'),
     error ? h('div', { role: 'alert', style: { padding: '7px 9px', marginBottom: 9, border: `1px solid ${colors.dangerBorder}`, borderRadius: 8, backgroundColor: colors.dangerBg, color: colors.danger, fontSize: 12 } }, error) : null,
-    h('div', { style: { position: 'relative', marginBottom: 8 } }, h('span', { style: { position: 'absolute', left: 10, top: 7, color: colors.secondary, pointerEvents: 'none' } }, h(Icon, { name: 'search', size: 15 })), h('input', { type: 'search', value: query, placeholder: '搜索供应商或模型（名称或 ID）…', onChange: event => setQuery(event.target.value), style: { ...field, height: 31, padding: '0 10px 0 32px', fontSize: 13 } })),
+    h('div', { style: { position: 'relative', marginBottom: 8 } }, h('span', { style: { position: 'absolute', left: 10, top: 7, color: colors.secondary, pointerEvents: 'none' } }, h(Icon, { name: 'search', size: 15 })), h('input', { type: 'search', value: query, placeholder: '搜索供应商或模型（名称或 ID）…', onChange: (event: React.ChangeEvent<HTMLInputElement>) => setQuery(event.target.value), style: { ...field, height: 31, padding: '0 10px 0 32px', fontSize: 13 } })),
     ...(loading ? [h('p', { style: muted }, '正在读取供应商和模型…')] : groups.length === 0 ? [h('div', { style: { ...muted, padding: 14, border: `1px solid ${colors.border}`, borderRadius: 8, backgroundColor: colors.group } }, routes.length === 0 ? '尚未在 llm-pi-ai 中找到供应商和模型。' : '没有匹配的模型。')] :
       groups.map(({ route, models, configured }) => {
         const open = search !== '' || openProviders[route] === true
@@ -131,9 +145,18 @@ function Editor({ api }) {
     h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 } }, h('span', { style: { ...muted, fontSize: 11 } }, `${rules.length} 条已保存规则`), h(Button, { colors, icon: 'refresh', disabled: loading || !!busyKey, onClick: () => { setNotice(''); void load() } }, '刷新列表')))
 }
 
-export function apply(ctx) {
-  const slots = ctx.get('slots')
-  if (!slots) return
+interface ClientSlots {
+  inject(name: string, callback: () => unknown): unknown
+  register(descriptor: Record<string, unknown>, render: () => React.ReactElement): unknown
+}
+interface ClientContext {
+  get(name: string): unknown
+  on(event: string, callback: (service: unknown) => void): unknown
+}
+
+export function apply(ctx: ClientContext): void {
+  const slots = ctx.get('slots') as ClientSlots | undefined
+  if (!slots || typeof slots.inject !== 'function' || typeof slots.register !== 'function') return
   let mounted = false
   const mount = () => {
     if (mounted) return
@@ -143,5 +166,5 @@ export function apply(ctx) {
     slots.inject('settings.section', () => slots.register({ name: 'settings.section', id: 'dsh-extra-body', order: 13, label: () => '请求附加字段' }, () => React.createElement(Editor, { api })))
   }
   mount()
-  ctx.on('internal/service', service => { if (service === 'remote.settings' || service === 'remote') mount() })
+  ctx.on('internal/service', (service: unknown) => { if (service === 'remote.settings' || service === 'remote') mount() })
 }

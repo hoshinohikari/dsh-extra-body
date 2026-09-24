@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
-import { modelGroups, readSettings, settingsBridge, validateRules } from '../src/client-core.js'
+import { modelGroups, readSettings, settingsBridge, validateRules } from '../lib/client-core.js'
 
 const namespaces = [
   { ns: 'extra-body', revision: 4, value: { rules: [{ provider: 'requesty', model: 'model-a', body: '{"requesty":{"auto_cache":true}}' }] } },

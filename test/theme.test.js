@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { isDarkTheme, palette } from '../src/theme.js'
+import { isDarkTheme, palette } from '../lib/theme.js'
 
 test('transparent backgrounds use the visible surface or text, not transparent black', () => {
   assert.equal(isDarkTheme({ bodyBackground: 'rgba(0, 0, 0, 0)', rootBackground: 'rgb(255, 255, 255)' }), false)
