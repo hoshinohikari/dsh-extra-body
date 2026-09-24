@@ -6,7 +6,7 @@ Add custom JSON fields to requests for a specific [DSH (DeepSeek Harness)](https
 
 - [中文 README](./README.zh.md)
 
-> **Compatibility boundary:** The plugin modifies HTTP(S) `POST` JSON requests made with the process's global `fetch` during a matching DSH `llm/stream` call. The outgoing JSON must have a top-level `model` equal to the configured model ID. The endpoint must accept the extra fields you choose. WebSocket traffic, non-JSON bodies, and transports that bypass global `fetch` are not covered.
+> **Compatibility boundary:** The plugin modifies HTTP(S) `POST` JSON requests made with the process's global `fetch` during a matching DSH `llm/stream` call. It matches the model by the JSON body's top-level `model`; for native Gemini `generateContent` and `streamGenerateContent`, it reads the model from the URL path, including when a proxy preserves that path. The endpoint must accept the extra fields you choose. WebSocket traffic, non-JSON bodies, and transports that bypass global `fetch` are not covered.
 
 ## Why use it?
 
@@ -25,7 +25,7 @@ Some OpenAI-compatible gateways accept request fields that DSH's standard model 
 
 - Discover providers and models from the existing `llm-pi-ai` settings section. Search by provider, model name, or model ID, then expand a model to edit its rule.
 - Switch the Desktop page between Chinese and English using DSH's shared language setting; the sidebar title, editor, and validation messages follow the selection.
-- Match an exact DSH provider route and model ID. A matching JSON request may use Chat Completions, Responses, Messages, or another model endpoint; the URL path is not fixed.
+- Match an exact DSH provider route and model ID. A matching JSON request may use Chat Completions, Responses, Messages, or another model endpoint. Native Google Gemini `generateContent` and `streamGenerateContent` requests are matched by the model in the URL path.
 - Recursively merge object fields into the outgoing JSON. Arrays and scalar values at the same key are replaced.
 - Validate JSON in the Desktop editor. Keep configured rules visible if their model later disappears from the inventory.
 - Read settings through either the older `connection.api.settings` RPC or the newer `remote.settings` service.
@@ -78,7 +78,7 @@ Use the provider route and model ID from **your** DSH configuration. `extra_body
 
 The host registers a settings section on namespace-based DSH; on entry-config DSH, its exported `Config` supplies the section. The Desktop page reads that section and the existing `llm-pi-ai` model inventory. Saves write the plugin's own `rules` array with a settings revision check.
 
-For each `llm/stream` call, the host selects the first rule whose provider and model exactly match the DSH call. While that stream is active, a scoped `fetch` wrapper examines HTTP(S) `POST` JSON requests. It merges the rule only when the request body's top-level `model` matches. Other requests pass through unchanged. Invalid stored rule JSON is skipped and warned about once; API keys and request bodies are not logged.
+For each `llm/stream` call, the host selects the first rule whose provider and model exactly match the DSH call. While that stream is active, a scoped `fetch` wrapper examines HTTP(S) `POST` JSON requests. It matches the request body's top-level `model`, or the URL model for native Gemini generation endpoints, before merging the rule. Other requests pass through unchanged. Invalid stored rule JSON is skipped and warned about once; API keys and request bodies are not logged.
 
 ## Verify installation
 
@@ -86,7 +86,7 @@ Run `dsh --profile <profile> --dump-default-config` and confirm the composed plu
 
 ## Limitations
 
-- A custom field may be valid for one gateway protocol and rejected by another. Test each provider/model combination you configure.
+- Native Gemini path matching covers `generateContent` and `streamGenerateContent` URLs, including proxy hosts that preserve the Google model path. A custom field may be valid for one gateway protocol and rejected by another; test each provider/model combination you configure.
 - Only JSON model requests that use global `fetch` are intercepted. WebSocket traffic, multipart requests, and transports with their own networking path are unaffected.
 - Rules cannot replace top-level `model`, `messages`, or `stream`. The editor requires a JSON object and rejects prototype-related keys.
 - If the same provider/model pair appears more than once in stored settings, the first rule wins; the Desktop editor prevents saving duplicates.

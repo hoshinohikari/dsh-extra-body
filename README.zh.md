@@ -6,7 +6,7 @@
 
 - [English README](./README.md)
 
-> **兼容边界：** 插件只处理匹配的 DSH `llm/stream` 调用期间，通过进程全局 `fetch` 发出的 HTTP(S) `POST` JSON 请求。请求体顶层 `model` 必须与规则中的模型 ID 一致，而且目标接口必须接受所添加的字段。WebSocket、非 JSON 请求体，以及不使用全局 `fetch` 的传输不在作用范围内。
+> **兼容边界：** 插件只处理匹配的 DSH `llm/stream` 调用期间，通过进程全局 `fetch` 发出的 HTTP(S) `POST` JSON 请求。通常从请求体顶层 `model` 匹配模型；原生 Gemini `generateContent` 和 `streamGenerateContent` 则从 URL 路径读取模型，保留该路径的代理也适用。目标接口必须接受所添加的字段。WebSocket、非 JSON 请求体，以及不使用全局 `fetch` 的传输不在作用范围内。
 
 ## 为什么需要它？
 
@@ -25,7 +25,7 @@
 
 - 从现有 `llm-pi-ai` 设置中自动发现供应商和模型；可按供应商、模型名称或模型 ID 搜索，再展开模型编辑规则。
 - 使用 DSH 的共用语言设置在中文与 English 之间切换；侧栏标题、编辑区和校验提示会随之更新。
-- 精确匹配 DSH 的供应商路由与模型 ID。命中的 JSON 请求可以来自 Chat Completions、Responses、Messages 或其他模型端点；插件不固定 URL 路径。
+- 精确匹配 DSH 的供应商路由与模型 ID。命中的 JSON 请求可以来自 Chat Completions、Responses、Messages 或其他模型端点。原生 Google Gemini `generateContent` 和 `streamGenerateContent` 请求会从 URL 路径读取模型 ID 进行匹配。
 - 对请求 JSON 中的对象字段递归合并；同名数组和标量由规则值替换。
 - 在 Desktop 页面校验 JSON。模型从清单中消失后，其已保存规则仍可查看和删除。
 - 同时支持旧版 `connection.api.settings` RPC 与新版 `remote.settings` 服务。
@@ -78,7 +78,7 @@ rules:
 
 在旧版 namespace 设置模型中，宿主注册自己的设置分区；在新版 entry-config 模型中，导出的 `Config` 提供该分区。Desktop 页面读取这个分区及现有 `llm-pi-ai` 模型清单；保存时带设置修订号写入插件自己的 `rules` 数组。
 
-每次 `llm/stream` 调用，宿主选出第一条与 DSH 调用的供应商和模型都精确匹配的规则。在该流有效期间，请求作用域内的 `fetch` 包装器检查 HTTP(S) `POST` JSON 请求；只有请求体顶层 `model` 同样匹配时才合并字段。其他请求保持原样。错误的已存 JSON 规则会被跳过并只警告一次；插件不记录 API 密钥和请求体。
+每次 `llm/stream` 调用，宿主选出第一条与 DSH 调用的供应商和模型都精确匹配的规则。在该流有效期间，请求作用域内的 `fetch` 包装器检查 HTTP(S) `POST` JSON 请求；通过请求体顶层 `model` 匹配，原生 Gemini 生成端点则通过 URL 中的模型 ID 匹配后合并字段。其他请求保持原样。错误的已存 JSON 规则会被跳过并只警告一次；插件不记录 API 密钥和请求体。
 
 ## 安装验证
 
@@ -87,6 +87,7 @@ rules:
 ## 重要限制
 
 - 同一自定义字段可能被某种网关协议接受，却被另一种协议拒绝；请逐个验证所配置的供应商与模型。
+- 原生 Gemini 路径匹配覆盖 `generateContent` 和 `streamGenerateContent` URL；保留 Google 模型路径的代理也适用。自定义字段是否受支持仍取决于目标端点。
 - 只拦截使用全局 `fetch` 的 JSON 模型请求。WebSocket、multipart 请求及自行处理网络传输的适配器不会受影响。
 - 规则不能覆盖顶层 `model`、`messages` 或 `stream`。编辑器要求填入 JSON 对象，并拒绝与原型相关的不安全键。
 - 如果已存设置中出现重复的供应商与模型组合，第一条规则生效；Desktop 编辑器会阻止保存重复项。

@@ -44,6 +44,24 @@ test('patchRequest reads a Request body without consuming the original', async (
   assert.equal(JSON.parse(await request.text()).requesty, undefined)
 })
 
+test('patchRequest matches native Gemini model IDs from generateContent URLs', async () => {
+  const init = {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ contents: [{ parts: [{ text: 'hello' }] }] }),
+  }
+  const rule = { model: 'gemini-2.5-flash', body: { generationConfig: { thinkingConfig: { thinkingBudget: 4096 } } } }
+  for (const method of ['generateContent', 'streamGenerateContent']) {
+    const next = await patchRequest(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:${method}?alt=sse`, init, rule)
+    assert.deepEqual(JSON.parse(next.body).generationConfig, rule.body.generationConfig)
+    assert.equal(JSON.parse(next.body).model, undefined)
+  }
+  const proxied = await patchRequest('https://api.relayrouter.ai/v1beta/models/gemini-2.5-flash:generateContent', init, rule)
+  assert.deepEqual(JSON.parse(proxied.body).generationConfig, rule.body.generationConfig)
+  assert.equal(await patchRequest('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', init, rule), undefined)
+  assert.equal(await patchRequest('https://api.relayrouter.ai/v1beta/models/gemini-2.5-flash:countTokens', init, rule), undefined)
+})
+
 test('middleware scopes injection to the selected provider and model', async () => {
   const requests = []
   const fakeFetch = async (_input, init) => {

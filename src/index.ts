@@ -42,6 +42,14 @@ interface HostContext {
 type FetchInput = Parameters<typeof fetch>[0]
 type FetchInit = Parameters<typeof fetch>[1]
 
+function geminiModelFromUrl(url: string): string | undefined {
+  try {
+    const parsed = new URL(url)
+    const match = /\/models\/([^/:]+):(generateContent|streamGenerateContent)\/?$/.exec(parsed.pathname)
+    return match?.[1] === undefined ? undefined : decodeURIComponent(match[1])
+  } catch { return undefined }
+}
+
 /** Rewrite a JSON model request made during the selected DSH LLM stream. */
 export async function patchRequest(input: FetchInput, init: FetchInit, rule: RuleContext): Promise<RequestInit | undefined> {
   const url = typeof input === 'string' || input instanceof URL ? String(input) : input?.url
@@ -65,7 +73,9 @@ export async function patchRequest(input: FetchInput, init: FetchInit, rule: Rul
 
   let payload: unknown
   try { payload = JSON.parse(source) } catch { return undefined }
-  if (!isObject(payload) || payload.model !== rule.model) return undefined
+  if (!isObject(payload)) return undefined
+  const requestModel = typeof payload.model === 'string' ? payload.model : geminiModelFromUrl(url)
+  if (requestModel !== rule.model) return undefined
   return { ...init, body: JSON.stringify(mergeObjects(payload, rule.body)) }
 }
 
